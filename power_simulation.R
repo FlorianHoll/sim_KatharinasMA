@@ -557,7 +557,7 @@ start_simulation = function(N_simulations = 10,
                         "Manifest WLE estimates", 
                         "Manifest Sum Scores ")
   
-  output_string = paste("\n--------------------------------------------------\n\nCONVERGENCE / ESTIMATABILITY:",
+  output_string = paste("\n\nCONVERGENCE / ESTIMATABILITY:",
                         paste0("\n  ", names_models_long, ": \t", 
                                round(amount_converged / N_simulations * 100, 3), 
                               "% of the models converged. (", 
@@ -594,15 +594,15 @@ plot_diff_results = function(sim_results) {
     theme_minimal() + 
     annotate("text", x=1.5, y=.05, label="True Effect", col="red") +
     geom_hline(yintercept=0, col="red", linetype="dashed") + 
-    labs(title= "Differences from True Effect",
-         y="Difference", x = "Model") + 
+    labs(title= "Distribution of differences from True Effect",
+         y="Difference from True Effect", x = "Model") + 
     ylim(-.6, .6)
   
   print(p)
   
 }
 
-plot_SEsize = function(sim_results) {
+plot_SEsize = function(sim_results, limit_y=F, max_y=1) {
   
   p = 
     ggplot(subset(sim_results, model!="LIN_REG"), aes(x=model, y=se, fill=model)) +
@@ -610,9 +610,12 @@ plot_SEsize = function(sim_results) {
     scale_fill_brewer(palette = "Dark2") + 
     geom_boxplot(width=.2, fill="white") +
     theme_minimal() + 
-    labs(title= "Size of Standard Error",
-         y="Size of SE", x = "Model") 
-  print(p)
+    labs(title= "Distribution of Standard Error sizes",
+         y="Size of Standard Error", x = "Model") 
+  
+  if (limit_y) { print(p + ylim(0, max_y))
+  } else {print(p)}
+  
 }
 
 plot_each_result = function(sim_results, N_plots_per_page) {
@@ -693,8 +696,4 @@ output_results_again = function(sim_results) {
 write_results_to_csv = function(sim_results, out_path, sim_nr) {
   write.csv2(sim_results, paste0(out_path, "/simulation_", sim_nr, ".csv"), row.names = F)
 }
-
-sim_results1 = start_simulation(N_simulations = 500)
-sim_results2 = start_simulation(N_simulations = 500, model_type = "Rasch")
-
 
