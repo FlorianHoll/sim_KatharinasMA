@@ -694,8 +694,6 @@ write_results_to_csv = function(sim_results, out_path, sim_nr) {
   write.csv2(sim_results, paste0(out_path, "/simulation_", sim_nr, ".csv"), row.names = F)
 }
 
-out_path = "C:/Users/Holl/Documents/Promotion/Lehre/WS_20_21_MA/power_sim/finished_csvs"
-
 sim_results1 = start_simulation(N_simulations = 500)
 sim_results2 = start_simulation(N_simulations = 500, model_type = "Rasch")
 
