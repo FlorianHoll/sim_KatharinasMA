@@ -36,11 +36,12 @@ all_global <- function() {
   }
 }
 
-# ------------------------------------------ #
-# --------- Functions for simulation ------- #
-# ------------------------------------------ #
+# push everything to cluster
 clusterEvalQ(cl, {
   
+  # ------------------------------------------ #
+  # ----- Packages and smaller functions ----- #
+  # ------------------------------------------ #
   library(mirt)
   library(lavaan)
   
@@ -531,9 +532,6 @@ clusterEvalQ(cl, {
   
 })
 
-# ------------------------------------------ #
-# -------- Actual simulation function ------ #
-# ------------------------------------------ #
 start_simulation = function(N_simulations = 10,
                             N_participants = 100, 
                             N_trials_per_participant = 8, 
@@ -654,55 +652,6 @@ start_simulation = function(N_simulations = 10,
 # --- Functions for finished simulation ---- #
 # ------------------------------------------ #
 
-output_results_again = function(sim_results) {
-  
-  se = function(x) return ( sd(x, na.rm=T) / sqrt(length(x)) )
-  
-  names_lat_models = c("parceling_WLEs", "parceling_Sum", "SI_WLE", "Manifest_WLE", "Manifest_Sum")
-  
-  amount_converged = sapply(names_lat_models, 
-                            function(x) {
-                              N_simulations - length(which(is.na(subset(sim_results, model==x)$estimate)))
-                            })
-  
-  differences = sapply(names_lat_models, 
-                       function(x) {
-                         mean(with(sim_results, diff[model==x]), na.rm=T)
-                       })
-  
-  differences_se = sapply(names_lat_models, 
-                          function(x) {
-                            se(with(sim_results, diff[model==x]))
-                          })
-  
-  estimate_in_ci = sapply(names_lat_models,
-                          function(x) {
-                            sum(as.numeric(as.logical(with(sim_results, in_ci[model==x]))), na.rm = T) 
-                          })
-  
-  names_models_long = c("Parceling-WLE estimates", 
-                        "Parceling Sum Scores", 
-                        "Single Indicator WLEs", 
-                        "Manifest WLE estimates", 
-                        "Manifest Sum Scores ")
-  
-  output_string = paste("\n\nCONVERGENCE / ESTIMATABILITY:",
-                        paste0("\n  ", names_models_long, ": \t", round(amount_converged / N_simulations * 100, 3), 
-                               "% of the models converged. (", amount_converged, " out of ", N_simulations, ")", collapse=""),
-                        
-                        "\n\nMEAN DIFFERENCES FROM TRUE EFFECT (ONLY THOSE THAT CONVERGED):",
-                        paste0("\n  ", names_models_long, ": \t", round(differences, 3), " (SE: ", round(differences_se, 3), ")", collapse=""),
-                        
-                        "\n\nPROPORTION OF ESTIMATES IN TRUE EFFECT CONFIDENCE INTERVAL (ONLY THOSE THAT CONVERGED):", 
-                        paste0("\n  ", names_models_long, ": \t", round(estimate_in_ci / amount_converged * 100, 3), 
-                               "% (", estimate_in_ci, " out of ", amount_converged, ")", collapse=""), 
-                        
-                        "\n\n--------------------------------------------------\n")
-  
-  cat(output_string)
-  
-}
-
 plot_diff_results = function(sim_results) {
   
   p = 
@@ -759,6 +708,56 @@ plot_each_result = function(sim_results, N_plots_per_page) {
     
     Sys.sleep(15)
   }
+  
+}
+
+output_results_again = function(sim_results) {
+  
+  se = function(x) return ( sd(x, na.rm=T) / sqrt(length(x)) )
+  
+  # --- output --- #
+  names_lat_models = c("parceling_WLEs", "parceling_Sum", "SI_WLE", "Manifest_WLE", "Manifest_Sum")
+  
+  amount_converged = sapply(names_lat_models, 
+                            function(x) {
+                              N_simulations - length(which(is.na(subset(sim_results, model==x)$estimate)))
+                            })
+  
+  differences = sapply(names_lat_models, 
+                       function(x) {
+                         mean(with(sim_results, diff[model==x]), na.rm=T)
+                       })
+  
+  differences_se = sapply(names_lat_models, 
+                          function(x) {
+                            se(with(sim_results, diff[model==x]))
+                          })
+  
+  estimate_in_ci = sapply(names_lat_models,
+                          function(x) {
+                            sum(as.numeric(as.logical(with(sim_results, in_ci[model==x]))), na.rm = T) 
+                          })
+  
+  names_models_long = c("Parceling-WLE estimates", 
+                        "Parceling Sum Scores", 
+                        "Single Indicator WLEs", 
+                        "Manifest WLE estimates", 
+                        "Manifest Sum Scores ")
+  
+  output_string = paste("\n--------------------------------------------------\n\nCONVERGENCE / ESTIMATABILITY:",
+                        paste0("\n  ", names_models_long, ": \t", round(amount_converged / N_simulations * 100, 3), 
+                               "% of the models converged. (", amount_converged, " out of ", N_simulations, ")", collapse=""),
+                        
+                        "\n\nMEAN DIFFERENCES FROM TRUE EFFECT (ONLY THOSE THAT CONVERGED):",
+                        paste0("\n  ", names_models_long, ": \t", round(differences, 3), " (SE: ", round(differences_se, 3), ")", collapse=""),
+                        
+                        "\n\nPROPORTION OF ESTIMATES IN TRUE EFFECT CONFIDENCE INTERVAL (ONLY THOSE THAT CONVERGED):", 
+                        paste0("\n  ", names_models_long, ": \t", round(estimate_in_ci / amount_converged * 100, 3), 
+                               "% (", estimate_in_ci, " out of ", amount_converged, ")", collapse=""), 
+                        
+                        "\n\n--------------------------------------------------\n")
+  
+  cat(output_string)
   
 }
 
