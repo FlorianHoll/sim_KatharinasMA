@@ -47,7 +47,7 @@ clusterEvalQ(cl, {
   conf_intval = function(x, se) c(x - 1.96 * se, x + 1.96 * se)
   
   is_in_conf_intval = function(x, conf_intval) {
-    if (is.na(x)) { 
+    if (is.na(x) | is.na(conf_intval[1]) | is.na(conf_intval[2])) { 
       return(NA)
     } else {
       if (x >= conf_intval[1] && x <= conf_intval[2]) return(TRUE) else return(FALSE)
@@ -65,14 +65,12 @@ clusterEvalQ(cl, {
   }
   
   extract_estimates = function(model) {
-    
-    if(!(is.na(model))) {
-      effects = c(inspect(model, "std.lv")$beta[1,2], inspect(model, "Std.Err")$beta[1,2])
+    if ( !is.na(model)) {
+      std_est = subset(standardizedSolution(model, type="std.lv"), op == "~")
+      return(as.numeric(std_est[4:5]))
     } else {
-      effects = c(NA, NA)
+      return(NA)
     }
-    
-    return(effects)
   }
     
   converged = function(model) inspect(model, "converged")
@@ -205,16 +203,17 @@ clusterEvalQ(cl, {
       }
     }
     
+    df[,4:11] = df2
+    
     # split data into N parts 
     split_list = split_test(df2, n_splits, intercepts)
     
     dataset = list(df, 
-                   df2, 
-                   alphas, 
-                   intercepts,
+                   list(alphas, intercepts),
                    split_list)
     
-    names(dataset) = c("df", "irt_df", "alphas", "intercepts", "split_list")
+    names(dataset) = c("df", "IRT_parameters", "split_list")
+    names(dataset$IRT_parameters) = c("alphas", "intercepts")
     
     return(dataset)
     
@@ -231,25 +230,28 @@ clusterEvalQ(cl, {
     # [1] IRT model with all items            #
     # [2] IRT models with parceling items     #
     # [3] Sum Score with all items            #
+    # [4] Sum Score with parceling items      #
     #                                         #
     # --------------------------------------- #
     
+    irt_df = dataset_list$df[,4:11]
     
     # --- [1] estimate IRT model with all items --- #
-    model_string = paste0("F1 = 1 - ", ncol(dataset_list$irt_df))
+    model_string = paste0("F1 = 1 - ", ncol(irt_df))
     
-    m = tryCatch(
-      mirt::mirt(dataset_list$irt_df, 
+    model = tryCatch(
+      mirt::mirt(irt_df, 
                  model=model_string,
                  itemtype=model_type, 
                  technical = list(removeEmptyRows = TRUE)),
       error = function(cond) return(NA)
     )
-    m -> model
     
     # estimate WLEs for single IRT model
-    WLEs_all <- fscores(model, method="WLE", full.scores=T)
-    WLEs_rel <- fscores(model, method="WLE", full.scores=T, returnER=T)
+    if (!is.na(model)) {
+      WLEs_all <- fscores(model, method="WLE", full.scores=T)
+      WLEs_rel <- fscores(model, method="WLE", full.scores=T, returnER=T)
+    } else WLEs_all = WLEs_rel = NA
     
     # into dataframe
     dataset_list$df["WLEs_all"] = as.numeric(WLEs_all)
@@ -258,7 +260,7 @@ clusterEvalQ(cl, {
     # --- [2] estimate IRT models with WLEs for each split --- #
     NA_pos = lapply(dataset_list$split, 
                  function(x) {
-                    as.numeric(which(rowSums(is.na(dataset_list$irt_df[, x])) == length(x)))
+                    as.numeric(which(rowSums(is.na(irt_df[, x])) == length(x)))
                  }
     )
     
@@ -267,7 +269,7 @@ clusterEvalQ(cl, {
                      function(x) {
                        model_string = paste0("F1 = 1 - ", length(x))
                        m = tryCatch(
-                         mirt::mirt(dataset_list$irt_df[,x], 
+                         mirt::mirt(irt_df[,x], 
                                     model=model_string,
                                     itemtype=model_type, 
                                     technical = list(removeEmptyRows = TRUE)),
@@ -278,19 +280,22 @@ clusterEvalQ(cl, {
     )
       
     # estimate WLEs
-    WLEs <- lapply(models, 
+    WLEs <- lapply(models,
                    function(x) {
-                     fscores(x, method="WLE", 
-                             full.scores = T)
+                     if (!is.na(x)) {
+                       fscores(x, method="WLE", 
+                               full.scores = T)
+                     } else NA
                    }
     )
     
     WLE_names = paste0("WLE", 1:length(WLEs))
     
     if (length(which(sapply(WLEs, length) == N_participants * n_splits)) != n_splits) {
-      
       for(i in 1:length(WLEs)) {
-        WLEs[[i]] = insert(as.numeric(WLEs[[i]]), NA_pos[[i]], NA)
+        if (!is.na(WLEs[[i]])) {
+          WLEs[[i]] = insert(as.numeric(WLEs[[i]]), NA_pos[[i]], NA)
+        }
       }
     }
       
@@ -301,16 +306,24 @@ clusterEvalQ(cl, {
     
     
     # --- [3] sum score with all items --- #
-    sum_score_all = as.numeric(rowSums(dataset_list$irt_df, na.rm = T))
+    sum_score_all = as.numeric(rowSums(irt_df, na.rm = T))
     dataset_list$df["sum_score_all"] = sum_score_all
     
-    # --- output --- #
-    dataset_list[[6]] = list(list(WLEs_all, WLEs_rel), WLEs)
+    # -- [4] sum scores with parceling items -- # 
+    dataset_list$df[paste0("sum_score", 1:n_splits)] = sapply(dataset_list$split_list, 
+                                                              function(x) {
+                                                                rowSums(irt_df[,x], na.rm=T)
+                                                                }
+    )
     
-    names(dataset_list)[6] = "WLEs"
-    names(dataset_list[[6]]) = c("WLE_whole_estimates", "WLE_split_estimates")
-    names(dataset_list$WLEs$WLE_whole_estimates) = c("WLEs", "Reliability")
-    dataset_list[[7]] = NA_pos
+    
+    # --- output --- #
+    dataset_list[[4]] = list(list(WLEs_all, WLEs_rel), WLEs)
+    
+    names(dataset_list[[4]]) = c("WLE_whole_estimates", "WLE_split_estimates")
+    names(dataset_list[[4]]$WLE_whole_estimates) = c("WLEs", "Reliability")
+    dataset_list[[5]] = NA_pos
+    names(dataset_list)[4:5] = c("WLEs", "NA_pos")
     
     return(dataset_list)
     
@@ -337,31 +350,22 @@ clusterEvalQ(cl, {
     # --- data structuring for analyses --- #
     d = dataset_list$df
     
-    WLE_norm_names = c("WLEs_all_norm", paste0("WLE", 1:n_splits, "_norm"))
-    sum_scores_norm_names = c("sum_score_all_norm", paste0("sum_score", 1:n_splits, "_norm"))
+    WLE_norm_names = grep("WLE", names(d), value=T)
+    sum_scores_norm_names = grep("sum_score", names(d), value=T)
 
-    WLE_parceling_names = paste0("WLE", 1:n_splits, "_norm")
-    sum_scores_parceling_names = paste0("sum_score", 1:n_splits, "_norm")
+    WLE_parceling_names = paste0("WLE", 1:n_splits)
+    sum_scores_parceling_names = paste0("sum_score", 1:n_splits)
     
     # linear regression 
     d$rot = as.factor(d$rot)
-    d$theta_norm = z_norm(d$theta)
     
     # latent WLE model
-    d[WLE_norm_names] = sapply(d[,grep("WLE", names(d))], function(x) z_norm(as.numeric(x)))
-    
-    # latent sum score model
-    d[paste0("sum_score", 1:n_splits)] = sapply(dataset_list$split_list, 
-                                                function(x) {
-                                                    rowSums(dataset_list$irt_df[,x], na.rm=T)
-                                                  }
-                                                )
-    d[sum_scores_norm_names] = sapply(d[,grep("sum_score", names(d))], z_norm)
+    d[paste0(WLE_norm_names, "_norm")] = sapply(d[WLE_norm_names], z_norm)
+    d[paste0(sum_scores_norm_names, "_norm")] = sapply(d[sum_scores_norm_names], z_norm)
     
     
     # --- [0] Linear regression model to estimate true effect --- #
-    lin_model = lm(theta ~ rot, d)
-    lin_model_norm = lm(theta_norm ~ rot, d)
+    lin_model_norm = lm(scale(theta) ~ rot, d)
     
     # extract effect estimate 
     true_effect = as.numeric(coef(lin_model_norm)[2])
@@ -383,7 +387,7 @@ clusterEvalQ(cl, {
     
     lat_model_WLEs = return_model_or_NA(lat_model_WLEs_s, d)
     
-     
+
     # --- [2] Latent model with sum scores --- #
     lat_model_sum_scores_s = paste(
       
@@ -401,10 +405,14 @@ clusterEvalQ(cl, {
     
     
     # --- [3] Latent model with WLE as single indicator --- #
+    WLE_Rel = dataset_list$WLEs$WLE_whole_estimates$Reliability
     lat_model_single_indicator_s = paste(
       
       # latent variable 
-      "Hist_Comp =~ ", paste0(sqrt(dataset_list$WLEs$WLE_whole_estimates$Reliability), "*", "WLEs_all_norm"), "\n",
+      "Hist_Comp =~ ", paste0(sqrt(WLE_Rel), "*", "WLEs_all"), "\n",
+      
+      # residual error 
+      "WLEs_all ~~ ", (1-WLE_Rel) * var(as.numeric(dataset_list$WLEs$WLE_whole_estimates$WLEs)), "*WLEs_all \n",
       
       # structural model 
       "Hist_Comp ~ rot"
@@ -417,7 +425,7 @@ clusterEvalQ(cl, {
     lat_model_manifest_WLEs_s = paste(
       
       # structural model 
-      "WLEs_all_norm ~ rot"
+      "WLEs_all ~ rot"
     )
     
     lat_model_manifest_WLEs = return_model_or_NA(lat_model_manifest_WLEs_s, d)
@@ -427,7 +435,7 @@ clusterEvalQ(cl, {
     lat_model_manifest_Sum_scores_s = paste(
       
       # structural model 
-      "sum_score_all_norm ~ rot"
+      "sum_score_all ~ rot"
     )
     
     lat_model_manifest_Sum_scores = return_model_or_NA(lat_model_manifest_Sum_scores_s, d)
@@ -448,9 +456,14 @@ clusterEvalQ(cl, {
     
     diff = sapply(latent_estimates, function(x) x[1] - as.numeric(true_effect))
     
-    in_ci = sapply(latent_estimates, 
+    in_ci = sapply(latent_models, 
                    function(x) {
-                      is_in_conf_intval(x[1], conf_intval(true_effect, true_effect_se)) 
+                     if (is.na(x)) {
+                       NA
+                     } else {
+                       std_est = subset(standardizedSolution(x, type="std.lv"), op == "~")
+                       is_in_conf_intval(true_effect, c(std_est[8], std_est[9])) 
+                     }
                    }
     )
     
@@ -508,10 +521,12 @@ start_simulation = function(N_simulations = 10,
   
   # --- convert to one result data frame --- # 
   sim_results = results[[1]]
-  for(i in 2:length(results)) {
-    sim_results = rbind(sim_results, results[[i]])
+  if (length(results) > 1) {
+    for(i in 2:length(results)) {
+      sim_results = rbind(sim_results, results[[i]])
+    }
+    sim_results$sim_nr = rep(1:N_simulations, each=6)
   }
-  sim_results$sim_nr = rep(1:N_simulations, each=6)
   
   # --- output --- #
   names_lat_models = c("parceling_WLEs", "parceling_Sum", "SI_WLE", "Manifest_WLE", "Manifest_Sum")
@@ -571,26 +586,33 @@ start_simulation = function(N_simulations = 10,
 
 plot_diff_results = function(sim_results) {
   
-  par(mfrow=c(1, 2))
-  
-  meanCIborder = 1.96 * mean(subset(sim_results1, model=="LIN_REG")$se)
-  
   p = 
     ggplot(subset(sim_results, model!="LIN_REG"), aes(x=model, y=diff, fill=model)) +
     geom_violin(alpha=.5) + 
     scale_fill_brewer(palette = "Dark2") + 
     geom_boxplot(width=.2, fill="white") +
     theme_minimal() + 
-    geom_hline(yintercept=meanCIborder, linetype="dashed") +
-    geom_hline(yintercept=-meanCIborder, linetype="dashed") +
-    annotate("text", x=1, y=meanCIborder + .05, label="Mean border of 95% CI") +
     annotate("text", x=1.5, y=.05, label="True Effect", col="red") +
-    geom_hline(yintercept=0, col="red", linetype="dashed")
+    geom_hline(yintercept=0, col="red", linetype="dashed") + 
+    labs(title= "Differences from True Effect",
+         y="Difference", x = "Model") + 
+    ylim(-.6, .6)
   
   print(p)
   
-  print(p + ylim(-.6, .6))
+}
+
+plot_SEsize = function(sim_results) {
   
+  p = 
+    ggplot(subset(sim_results, model!="LIN_REG"), aes(x=model, y=se, fill=model)) +
+    geom_violin(alpha=.5) + 
+    scale_fill_brewer(palette = "Dark2") + 
+    geom_boxplot(width=.2, fill="white") +
+    theme_minimal() + 
+    labs(title= "Size of Standard Error",
+         y="Size of SE", x = "Model") 
+  print(p)
 }
 
 plot_each_result = function(sim_results, N_plots_per_page) {
@@ -605,16 +627,15 @@ plot_each_result = function(sim_results, N_plots_per_page) {
       geom_line() + 
       geom_point(size=2) + 
       facet_wrap(~sim_nr) +
-      ylim(-.1, 1.1) +
-      annotate("text", x=2, y=1, label="95% CI for true effect") +
+      ylim(-.5, 1.5) +
+      geom_text(data = subset(df, model=="LIN_REG"), 
+                aes(y = estimate, label = "True Effect")) +
       geom_hline(data = subset(df, model=="LIN_REG"), 
-                 aes(yintercept=estimate+1.96*se), color="black", linetype="dashed", size=.4) + 
-      geom_hline(data = subset(df, model=="LIN_REG"), 
-                 aes(yintercept=estimate-1.96*se), color="black", linetype="dashed", size=.4)
-    
+                 aes(yintercept=estimate), color="black", linetype="dashed", size=.4)
+      
     print(pl)
     
-    Sys.sleep(10)
+    Sys.sleep(15)
   }
   
 }
@@ -674,5 +695,8 @@ write_results_to_csv = function(sim_results, out_path, sim_nr) {
 }
 
 out_path = "C:/Users/Holl/Documents/Promotion/Lehre/WS_20_21_MA/power_sim/finished_csvs"
+
+sim_results1 = start_simulation(N_simulations = 500)
+sim_results2 = start_simulation(N_simulations = 500, model_type = "Rasch")
 
 
