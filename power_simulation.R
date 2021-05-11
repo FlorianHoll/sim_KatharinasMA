@@ -24,9 +24,11 @@
 library(parallel)  
 library(ggplot2)
 
+# Cluster to exploit all CPU cores
 num_cores = detectCores()
 cl <- makeCluster(num_cores)
 
+# Function to push variables into global environment
 all_global <- function() {
   lss <- ls(envir = parent.frame())
   for (i in lss) {
@@ -36,6 +38,7 @@ all_global <- function() {
 
 # push everything to cluster
 clusterEvalQ(cl, {
+  
   # ------------------------------------------ #
   # ----- Packages and smaller functions ----- #
   # ------------------------------------------ #
@@ -54,8 +57,6 @@ clusterEvalQ(cl, {
     }
   }
   
-  meansd = function(x) c(mean(x), sd(x))
-  
   return_model_or_NA = function(model_to_fit, df) {
     m = tryCatch(
       sem(model_to_fit, df, estimator="MLR", missing="fiml"),
@@ -72,22 +73,13 @@ clusterEvalQ(cl, {
       return(NA)
     }
   }
-    
+  
   converged = function(model) inspect(model, "converged")
   
-  # ------------------------------------------ #
-  # --------- IRT MODEL (1PL or 2PL) --------- #
-  # ------------------------------------------ #
-  irt_model = function(a=1, d, t) 1 / (1 + exp(a * (d - t)))
-  
-  
-  # ------------------------------------------ #
-  # -- Function to insert NA at right place -- #
-  # ------------------------------------------ #
+  # function to insert NAs at right position
   insert = function(x, insert_pos, value) {
     
     new = numeric(0)
-    
     l = length(x) + length(insert_pos)
     
     for(i in 1:(length(insert_pos)+1)) {
@@ -102,14 +94,29 @@ clusterEvalQ(cl, {
         new = append(new, x[(insert_pos[i-1]-(i-2)):length(x)])
       }
     }
+    
     return(new[1:l])
   }
+    
+  # IRT model (1PL or 2PL)
+  irt_model = function(a=1, d, t) 1 / (1 + exp(a * (d - t)))
   
-  
-  # ------------------------------------------ #
-  # ------ function to split the dataset ----- #
-  # ------------------------------------------ #
+  # function to split the data set
   split_test = function(df2, n_splits, intercepts) {
+    
+    # ====== Split test based on equal distribution ====== #
+    #        of item difficulties                          #
+    # 
+    # Args: 
+    #   [df2]         = Data frame (only items as columns)
+    #   [n_splits]    = Number of desired splits 
+    #   [intercepts]  = Vector with intercepts.
+    # 
+    # Returns: 
+    #   [item_splits] = list with each element containing
+    #                   the items of the Nth split
+    #
+    # ==================================================== #
     
     criterion = sqrt(n_splits)/10 
     criterion = max(c(0.002, criterion-.15))
@@ -117,8 +124,10 @@ clusterEvalQ(cl, {
     n_items_per_split = ncol(df2) %/% n_splits
     i=0; cat("Iteration \tMSE \tCriterion \n ---------------------------------- \n")
     while(1) {
+      
+      # shuffle items and split dataset
       shuffled_items = sample(ncol(df2))
-      item_split = split(shuffled_items, 1:n_splits) #split items
+      item_split = split(shuffled_items, 1:n_splits) 
       
       # if there are more items in the last split, add them to previous
       if (length(item_split) != n_splits) {
@@ -127,13 +136,17 @@ clusterEvalQ(cl, {
         item_split[[length(item_split)]] = NULL
       }
       
+      # calculate means of intercepts
       split_means = sapply(item_split, function(x) mean(intercepts[x]))
       
+      # calculate mean squared error of split
       MSE = 1/(length(split_means) - 1) * sum((split_means[-1] - split_means[1]) ^ 2 )
       
+      # if criterion is too hard for a solution to occur, soften the criterion
       i = i+1
       if (i %% 1000 == 0) criterion = criterion + .02
       
+      # output results to console and break loop if criterion is fulfilled
       cat("\r", i, "\t\t", round(MSE, 3), "\t", round(criterion, 3))
       if (MSE < criterion) break
       
@@ -144,10 +157,31 @@ clusterEvalQ(cl, {
   }
   
   
-  # ------------------------------------------ #
-  # ------ function for simulating data ------ #
-  # ------------------------------------------ #
   create_dataset = function(N_participants, N_trials_per_participant, n_splits, hist_effect, ICC) {
+    
+    # ====== Simulate data with given parameters ====== #
+    # 
+    # Args: 
+    #   [N_participants]  = self-explanatory
+    #   [N_trials_...]    = number of items each 
+    #                       participant sees
+    #   [n_splits]        = number of splits (handed over 
+    #                       to split_test function)
+    #   [hist_effect]     = Effect of 160° rotation (in SDs)
+    #   [ICC]             = intraclass correlation 
+    # 
+    # Returns: 
+    #   [dataset]         = list containing: 
+    #                       $df = data frame with all 
+    #                             relevant information
+    #                       $IRT_parameters = list with 
+    #                             discrimination and difficulty
+    #                             parameters
+    #                       $split_list = list with each 
+    #                             element containing items of 
+    #                             Nth split
+    #
+    # ==================================================== #
     
     N_data_points = N_participants * N_trials_per_participant
     
@@ -186,15 +220,14 @@ clusterEvalQ(cl, {
     if (model_type !="Rasch") alphas = round(runif(N_trials_per_participant, .7, 1.2), 3) else alphas = rep(1, N_trials_per_participant)
     item_params = data.frame(alphas=alphas, difficulty=intercepts)
     
-    # simulate responses to items
+    # simulate responses to IRT items
     for(i in 1:length(item_list)) {
       prob <- irt_model(alphas[i], intercepts[i], df$theta)
       df[item_list[i]] <- rbinom(N_participants*2, 1, prob)
     }
    
     # insert NAs to account for design of experiment (participants only see one version of each item)
-    df2 = df[-c(1:3)] # data frame only with columns of interest, i.e. items
-    
+    df2 = df[-c(1:3)] 
     for(i in df$ID) {
       for(j in 1:2) {
         no_nas = items[[i]][[j]]
@@ -203,11 +236,13 @@ clusterEvalQ(cl, {
       }
     }
     
+    # back to original data frame
     df[,4:11] = df2
     
     # split data into N parts 
     split_list = split_test(df2, n_splits, intercepts)
     
+    # combine into list
     dataset = list(df, 
                    list(alphas, intercepts),
                    split_list)
@@ -220,23 +255,32 @@ clusterEvalQ(cl, {
   }
   
   
-  # ------------------------------------------ #
-  # --- function for estimating IRT model ---- #
-  # ------------------------------------------ #
   estimate_IRT_model = function(dataset_list) {
     
-    # --- estimated models and indicators --- #
-    #                                         #
-    # [1] IRT model with all items            #
-    # [2] IRT models with parceling items     #
-    # [3] Sum Score with all items            #
-    # [4] Sum Score with parceling items      #
-    #                                         #
-    # --------------------------------------- #
+    # ====== Estimate IRT models for simulated data ====== #
+    # 
+    # Args: 
+    #   [dataset_list]    = output of create_dataset function
+    #
+    # Returns: 
+    #   [dataset_list]    = same list, but with added 
+    #                       information (WLEs, Sum Scores)
+    #
+    # ==================================================== #
     
+    # --------- estimated models and indicators ---------- #
+    #                                                      #
+    # [1] IRT model with all items                         #
+    # [2] IRT models for each split                        #
+    # [3] Sum Score with all items                         #
+    # [4] Sum Score with parceling items                   #
+    #                                                      #
+    # ---------------------------------------------------- #
+    
+    # only relevant data
     irt_df = dataset_list$df[,4:11]
     
-    # --- [1] estimate IRT model with all items --- #
+    # --- [1] IRT model with all items --- #
     model_string = paste0("F1 = 1 - ", ncol(irt_df))
     
     model = tryCatch(
@@ -247,7 +291,7 @@ clusterEvalQ(cl, {
       error = function(cond) return(NA)
     )
     
-    # estimate WLEs for single IRT model
+    # estimate WLEs
     if (!is.na(model)) {
       WLEs_all <- fscores(model, method="WLE", full.scores=T)
       WLEs_rel <- fscores(model, method="WLE", full.scores=T, returnER=T)
@@ -257,7 +301,7 @@ clusterEvalQ(cl, {
     dataset_list$df["WLEs_all"] = as.numeric(WLEs_all)
     
     
-    # --- [2] estimate IRT models with WLEs for each split --- #
+    # --- [2] IRT model for each split --- #
     NA_pos = lapply(dataset_list$split, 
                  function(x) {
                     as.numeric(which(rowSums(is.na(irt_df[, x])) == length(x)))
@@ -291,6 +335,8 @@ clusterEvalQ(cl, {
     
     WLE_names = paste0("WLE", 1:length(WLEs))
     
+    # if there are empty rows due to the experimental design, 
+    #     re-insert them (mirt function deletes them)
     if (length(which(sapply(WLEs, length) == N_participants * n_splits)) != n_splits) {
       for(i in 1:length(WLEs)) {
         if (!is.na(WLEs[[i]])) {
@@ -298,18 +344,18 @@ clusterEvalQ(cl, {
         }
       }
     }
-      
+    
     names(WLEs) = WLE_names
     
     # into data frame
     dataset_list$df[WLE_names] = sapply(WLEs, function(x) x)
     
     
-    # --- [3] sum score with all items --- #
+    # --- [3] Sum Score with all items --- #
     sum_score_all = as.numeric(rowSums(irt_df, na.rm = T))
     dataset_list$df["sum_score_all"] = sum_score_all
     
-    # -- [4] sum scores with parceling items -- # 
+    # --- [4] Sum Scores with parceling items --- # 
     dataset_list$df[paste0("sum_score", 1:n_splits)] = sapply(dataset_list$split_list, 
                                                               function(x) {
                                                                 rowSums(irt_df[,x], na.rm=T)
@@ -330,25 +376,34 @@ clusterEvalQ(cl, {
   } 
   
   
-  # ------------------------------------------ #
-  # --- Linear regression and latent models -- #
-  # ------------------------------------------ #
   estimate_compare_effects = function(dataset_list) {
     
-    # ----------- estimated models ---------- #
-    #                                         #
-    # [0] linear regression                   #
-    # [1] SEM with WLEs                       #
-    # [2] SEM with Sum Scores                 # 
-    # [3] SEM with single indicator WLEs      #
-    # [4] SEM with manifest WLEs              #
-    # [5] SEM with manifest Sum Scores        #
-    #                                         #
-    # --------------------------------------- #
+    # ====== Estimate linear regression and latent models ====== #
+    # 
+    # Args: 
+    #   [dataset_list]    = output of estimate_IRT_model function
+    #
+    # Returns: 
+    #   [simres]          = data frame containing all information
+    #                       of model estimation
+    #
+    # ========================================================== #
+    
+    # -------------------- estimated models -------------------- #
+    #                                                            #
+    # [0] linear regression                                      #
+    # [1] SEM with WLEs                                          #
+    # [2] SEM with Sum Scores                                    # 
+    # [3] SEM with single indicator WLEs                         #
+    # [4] SEM with manifest WLEs                                 #
+    # [5] SEM with manifest Sum Scores                           #
+    #                                                            #
+    # ---------------------------------------------------------- #
     
     
     # --- data structuring for analyses --- #
     d = dataset_list$df
+    d$rot = as.factor(d$rot)
     
     WLE_norm_names = grep("WLE", names(d), value=T)
     sum_scores_norm_names = grep("sum_score", names(d), value=T)
@@ -356,10 +411,6 @@ clusterEvalQ(cl, {
     WLE_parceling_names = paste0("WLE", 1:n_splits)
     sum_scores_parceling_names = paste0("sum_score", 1:n_splits)
     
-    # linear regression 
-    d$rot = as.factor(d$rot)
-    
-    # latent WLE model
     d[paste0(WLE_norm_names, "_norm")] = sapply(d[WLE_norm_names], z_norm)
     d[paste0(sum_scores_norm_names, "_norm")] = sapply(d[sum_scores_norm_names], z_norm)
     
@@ -467,6 +518,7 @@ clusterEvalQ(cl, {
                    }
     )
     
+    # all information into data frame
     simres = data.frame(model = c("LIN_REG", names_lat_models),
                          estimate = c(true_effect, as.numeric(sapply(latent_estimates, function(x) x[1]))),
                          se = c(true_effect_se, as.numeric(sapply(latent_estimates, function(x) x[2]))),
@@ -480,18 +532,34 @@ clusterEvalQ(cl, {
   
 })
 
-# ------------------------------------------ #
-# ---------- actual simulation  ------------ #
-# ------------------------------------------ #
 start_simulation = function(N_simulations = 10,
                             N_participants = 100, 
                             N_trials_per_participant = 8, 
                             model_type = "2PL", 
                             n_splits = 2, 
                             hist_effect = .5, 
-                            ICC = .1,
-                            plot = FALSE
+                            ICC = .1
   ) {
+  
+  # =============== Actual simulation function =============== #
+  # 
+  # Args: 
+  #   [N_simulations]   
+  #   [N_particpiants]  
+  #   [N_trials...]       = number of items one
+  #                         participant sees
+  #   [model_type]        = IRT model to be estimated.
+  #                         Either "Rasch" or "2PL"
+  #   [n_splits]          = number of indicators to form 
+  #                         latent variables with
+  #   [hist_effect]       = Effect of 160° (in SDs)
+  #   [ICC]               = Intraclass correlation
+  #
+  # Returns: 
+  #   [simres]          = data frame containing all 
+  #                       infos of model estimation
+  #
+  # ========================================================== #
   
   # push variables to global environment
   all_global()
