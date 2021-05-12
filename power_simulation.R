@@ -236,7 +236,7 @@ clusterEvalQ(cl, {
     }
     
     # back to original data frame
-    df[,4:11] = df2
+    df[,4:(4+N_trials_per_participant-1)] = df2
     
     # split data into N parts 
     split_list = split_test(df2, n_splits, intercepts)
@@ -277,7 +277,7 @@ clusterEvalQ(cl, {
     # ---------------------------------------------------- #
     
     # only relevant data
-    irt_df = dataset_list$df[,4:11]
+    irt_df = dataset_list$df[,4:(4+N_trials_per_participant-1)]
     
     # --- [1] IRT model with all items --- #
     model_string = paste0("F1 = 1 - ", ncol(irt_df))
@@ -765,4 +765,5 @@ plot_each_result = function(sim_results, N_plots_per_page) {
 write_results_to_csv = function(sim_results, out_path, sim_nr) {
   write.csv2(sim_results, paste0(out_path, "/simulation_", sim_nr, ".csv"), row.names = F)
 }
+
 
