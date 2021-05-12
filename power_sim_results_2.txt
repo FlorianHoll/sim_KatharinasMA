@@ -242,3 +242,29 @@ PROPORTION OF ESTIMATES IN TRUE EFFECT CONFIDENCE INTERVAL (ONLY THOSE THAT CONV
   Manifest Sum Scores : 	48.4% (242 out of 500) 
 
 --------------------------------------------------
+
+> sim_results10 = start_simulation(N_simulations = 500, N_participants = 300, hist_effect =1, model_type="Rasch")
+
+
+CONVERGENCE / ESTIMATABILITY: 
+  Parceling-WLE estimates: 	97.6% of the models converged. (488 out of 500)
+  Parceling Sum Scores: 	37.4% of the models converged. (187 out of 500)
+  Single Indicator WLEs: 	100% of the models converged. (500 out of 500)
+  Manifest WLE estimates: 	100% of the models converged. (500 out of 500)
+  Manifest Sum Scores : 	100% of the models converged. (500 out of 500) 
+
+MEAN DIFFERENCES FROM TRUE EFFECT (ONLY THOSE THAT CONVERGED): 
+  Parceling-WLE estimates: 	0.059 (SE: 0.007)
+  Parceling Sum Scores: 	0.95 (SE: 0.07)
+  Single Indicator WLEs: 	-0.081 (SE: 0.004)
+  Manifest WLE estimates: 	-0.044 (SE: 0.004)
+  Manifest Sum Scores : 	-0.192 (SE: 0.004) 
+
+PROPORTION OF ESTIMATES IN TRUE EFFECT CONFIDENCE INTERVAL (ONLY THOSE THAT CONVERGED): 
+  Parceling-WLE estimates: 	96.721% (472 out of 488)
+  Parceling Sum Scores: 	88.77% (166 out of 187)
+  Single Indicator WLEs: 	91.6% (458 out of 500)
+  Manifest WLE estimates: 	97% (485 out of 500)
+  Manifest Sum Scores : 	44.4% (222 out of 500) 
+
+--------------------------------------------------
